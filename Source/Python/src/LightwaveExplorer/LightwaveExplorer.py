@@ -2,6 +2,7 @@
 
 import io
 import os
+import subprocess
 import tempfile
 import urllib.request
 import zipfile
@@ -534,6 +535,68 @@ class lightwaveExplorerResult:
             self.spatialStep * (np.arange(0, self.Nspace) - self.Nspace / 2)
             + 0.25 * self.spatialStep
         )
+
+    def to_dict(self) -> dict:
+        """
+        Export all simulation parameters and results as a flat dictionary.
+        Scalar parameters become float values, arrays become numpy arrays.
+        Useful for feeding data into ML pipelines.
+
+        :return: Dictionary of all parameters and result arrays
+        :rtype: dict
+        """
+        d = {}
+        # Scalar parameters
+        scalar_attrs = [
+            "pulseEnergy1", "pulseEnergy2", "frequency1", "frequency2",
+            "bandwidth1", "bandwidth2", "cePhase1", "cePhase2",
+            "delay1", "delay2", "gdd1", "gdd2", "tod1", "tod2",
+            "beamwaist1", "beamwaist2", "crystalTheta", "crystalPhi",
+            "crystalThickness", "propagationStep", "spatialWidth",
+            "spatialHeight", "spatialStep", "timeSpan", "timeStep",
+            "nonlinearAbsorptionStrength", "bandGapElectronVolts",
+            "effectiveMass", "drudeGamma", "materialIndex",
+            "Ntime", "Nfreq", "Nspace", "Nspace2", "Ngrid",
+            "Nsims", "Nsims2", "batchIndex", "batchIndex2",
+            "batchDestination", "batchDestination2", "symmetryType",
+            "fStep",
+        ]
+        for attr in scalar_attrs:
+            if hasattr(self, attr):
+                d[attr] = getattr(self, attr)
+
+        # Array data
+        array_attrs = [
+            "spectrumTotal", "spectrum_x", "spectrum_y",
+            "timeVector", "frequencyVectorSpectrum", "spaceVector",
+            "batchVector", "batchVector2",
+        ]
+        for attr in array_attrs:
+            if hasattr(self, attr):
+                d[attr] = np.asarray(getattr(self, attr))
+
+        # Field arrays (may not be loaded)
+        if hasattr(self, "Ext_x"):
+            d["Ext_x"] = self.Ext_x
+        if hasattr(self, "Ext_y"):
+            d["Ext_y"] = self.Ext_y
+
+        return d
+
+    def to_npz(self, path: str, compressed: bool = True):
+        """
+        Save all simulation parameters and results to a .npz file.
+
+        :param path: Output file path (should end with .npz)
+        :type path: str
+        :param compressed: If True, use compressed format (smaller files)
+        :type compressed: bool
+        """
+        d = self.to_dict()
+        if compressed:
+            np.savez_compressed(path, **d)
+        else:
+            np.savez(path, **d)
 
 
 def fwhm(x: np.ndarray, y: np.ndarray, height: float = 0.5) -> float:
@@ -1406,3 +1469,348 @@ def fuseZips(outputFile: str):
     spectrum.close()
     os.unlink(Ext.name)
     os.unlink(spectrum.name)
+
+
+class SimulationRunner:
+    """
+    A Python wrapper around the LWE command-line interface for running
+    simulations programmatically. Supports bidirectional data exchange:
+    Python can set parameters and read results, enabling ML workflows.
+
+    Usage::
+
+        runner = SimulationRunner(cli_path="/path/to/lwe")
+
+        # Load parameters from an existing LWE output file
+        runner.load_params("existing_sim.txt")  # or .zip
+
+        # Override specific parameters
+        runner.set_params(crystal_thickness=500e-6, pulse_energy1=1e-6)
+
+        # Run the simulation
+        runner.run()
+
+        # Access results
+        data = runner.result.to_dict()
+        spectrum = data["spectrumTotal"]  # numpy array for ML
+
+    :param cli_path: Path to the LWE CLI executable
+    :type cli_path: str
+    :param work_dir: Working directory for temp files (auto-created if None)
+    :type work_dir: str or None
+    """
+
+    # Mapping from Python-friendly parameter names to LWE file labels.
+    # Format: {python_name: "LWE Label"}
+    # Values are written as "LWE Label: <value>\n"
+    PARAM_MAP = {
+        # Pulse 1
+        "pulse_energy1":              "Pulse energy 1 (J)",
+        "frequency1":                 "Frequency 1 (Hz)",
+        "bandwidth1":                 "Bandwidth 1 (Hz)",
+        "sg_order1":                  "SG order 1",
+        "cep1":                       "CEP 1 (rad)",
+        "delay1":                     "Delay 1 (s)",
+        "gdd1":                       "GDD 1 (s^-2)",
+        "tod1":                       "TOD 1 (s^-3)",
+        "phase_material1_index":      "Phase material 1 index",
+        "phase_material_thickness1":  "Phase material thickness 1 (mcr.)",
+        "beamwaist1":                 "Beamwaist 1 (m)",
+        "x_offset1":                  "x offset 1 (m)",
+        "y_offset1":                  "y offset 1 (m)",
+        "z_offset1":                  "z offset 1 (m)",
+        "nc_angle1":                  "NC angle 1 (rad)",
+        "nc_angle_phi1":              "NC angle phi 1 (rad)",
+        "polarization1":              "Polarization 1 (rad)",
+        "circularity1":               "Circularity 1",
+        # Pulse 2
+        "pulse_energy2":              "Pulse energy 2 (J)",
+        "frequency2":                 "Frequency 2 (Hz)",
+        "bandwidth2":                 "Bandwidth 2 (Hz)",
+        "sg_order2":                  "SG order 2",
+        "cep2":                       "CEP 2 (rad)",
+        "delay2":                     "Delay 2 (s)",
+        "gdd2":                       "GDD 2 (s^-2)",
+        "tod2":                       "TOD 2 (s^-3)",
+        "phase_material2_index":      "Phase material 2 index",
+        "phase_material_thickness2":  "Phase material thickness 2 (mcr.)",
+        "beamwaist2":                 "Beamwaist 2 (m)",
+        "x_offset2":                  "x offset 2 (m)",
+        "y_offset2":                  "y offset 2 (m)",
+        "z_offset2":                  "z offset 2 (m)",
+        "nc_angle2":                  "NC angle 2 (rad)",
+        "nc_angle_phi2":              "NC angle phi 2 (rad)",
+        "polarization2":              "Polarization 2 (rad)",
+        "circularity2":               "Circularity 2",
+        # Crystal / material
+        "material_index":             "Material index",
+        "material_index_alternate":   "Alternate material index",
+        "crystal_theta":              "Crystal theta (rad)",
+        "crystal_phi":                "Crystal phi (rad)",
+        # Grid
+        "grid_width":                 "Grid width (m)",
+        "grid_height":                "Grid height (m)",
+        "dx":                         "dx (m)",
+        "time_span":                  "Time span (s)",
+        "dt":                         "dt (s)",
+        "crystal_thickness":          "Thickness (m)",
+        "dz":                         "dz (m)",
+        # Plasma
+        "nonlinear_absorption":       "Nonlinear absorption parameter",
+        "initial_carrier_density":    "Initial carrier density (m^-3)",
+        "band_gap":                   "Band gap (eV)",
+        "effective_mass":             "Effective mass (relative)",
+        "drude_gamma":                "Drude gamma (Hz)",
+        # Mode
+        "propagation_mode":           "Propagation mode",
+        # Batch
+        "batch_mode":                 "Batch mode",
+        "batch_destination":          "Batch destination",
+        "batch_steps":                "Batch steps",
+        "batch_mode2":                "Batch mode 2",
+        "batch_destination2":         "Batch destination 2",
+        "batch_steps2":               "Batch steps 2",
+        # Advanced
+        "sequence":                   "Sequence",
+        "fitting":                    "Fitting",
+        "fitting_mode":               "Fitting mode",
+    }
+
+    # Reverse map: LWE label -> python name
+    _LABEL_TO_PARAM = {v: k for k, v in PARAM_MAP.items()}
+
+    def __init__(self, cli_path: str = "lwe", work_dir: str = None):
+        self.cli_path = cli_path
+        self._work_dir = work_dir
+        self._temp_dir = None
+        self._params: dict = {}  # python_name -> value
+        self._raw_lines: dict = {}  # LWE label -> value string (for labels we don't map)
+        self._result: lightwaveExplorerResult = None
+        self._output_path: str = None
+
+    @property
+    def params(self) -> dict:
+        """Current parameters as a dict of {python_name: value}."""
+        return dict(self._params)
+
+    @property
+    def result(self) -> lightwaveExplorerResult:
+        """The result of the last simulation run. None if not yet run."""
+        return self._result
+
+    def load_params(self, file_path: str):
+        """
+        Load simulation parameters from an existing LWE output file.
+        Supports .txt settings files and .zip archives.
+
+        :param file_path: Path to .txt or .zip file
+        :type file_path: str
+        """
+        if file_path.endswith(".zip"):
+            archive = zipfile.ZipFile(file_path, "r")
+            base = os.path.splitext(os.path.basename(file_path))[0]
+            f = io.TextIOWrapper(archive.open(base + ".txt"), "utf-8")
+            lines = f.readlines()
+            f.close()
+            archive.close()
+        else:
+            with open(file_path, "r") as f:
+                lines = f.readlines()
+
+        for line in lines:
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+
+            # Find the last colon to split label and value
+            colon_pos = line.rfind(":")
+            label = line[:colon_pos].strip()
+            value_str = line[colon_pos + 1:].strip()
+
+            if not value_str:
+                continue
+
+            # Check if this label is in our known map
+            if label in self._LABEL_TO_PARAM:
+                python_name = self._LABEL_TO_PARAM[label]
+                try:
+                    self._params[python_name] = float(value_str)
+                except ValueError:
+                    # String parameter (e.g. sequence, fitting)
+                    self._params[python_name] = value_str
+            else:
+                # Store unknown labels as raw lines (e.g. Output base path)
+                self._raw_lines[label] = value_str
+
+    def set_params(self, **kwargs):
+        """
+        Set one or more simulation parameters using Python-friendly names.
+
+        Parameter names use snake_case. See SimulationRunner.PARAM_MAP for
+        the complete list and their correspondence to LWE labels.
+
+        Example::
+
+            runner.set_params(
+                pulse_energy1=1e-6,
+                crystal_thickness=500e-6,
+                frequency1=375e12,
+            )
+        """
+        for key, value in kwargs.items():
+            if key not in self.PARAM_MAP:
+                raise ValueError(
+                    f"Unknown parameter '{key}'. "
+                    f"Available: {sorted(self.PARAM_MAP.keys())}"
+                )
+            self._params[key] = value
+
+    def write_settings_file(self, path: str):
+        """
+        Write current parameters to a .txt file in LWE format.
+        The output is compatible with the C++ readInputParametersFile().
+
+        :param path: Output file path
+        :type path: str
+        """
+        with open(path, "w") as f:
+            # Write mapped parameters
+            for python_name, label in self.PARAM_MAP.items():
+                if python_name in self._params:
+                    value = self._params[python_name]
+                    f.write(f"{label}: {value}\n")
+
+            # Write raw/unmapped parameters
+            for label, value in self._raw_lines.items():
+                f.write(f"{label}: {value}\n")
+
+    def run(self, output_name: str = "lwe_output", timeout: float = None,
+            verbose: bool = True) -> lightwaveExplorerResult:
+        """
+        Run a simulation using the current parameters.
+
+        1. Writes parameters to a temporary .txt file
+        2. Invokes the LWE CLI via subprocess
+        3. Loads and returns the result
+
+        :param output_name: Base name for the output files
+        :type output_name: str
+        :param timeout: Maximum time in seconds to wait for the simulation
+        :type timeout: float or None
+        :param verbose: If True, print CLI output
+        :type verbose: bool
+
+        :return: The simulation result
+        :rtype: lightwaveExplorerResult
+        """
+        # Create working directory
+        if self._work_dir:
+            work = self._work_dir
+            os.makedirs(work, exist_ok=True)
+        else:
+            self._temp_dir = tempfile.TemporaryDirectory()
+            work = self._temp_dir.name
+
+        output_base = os.path.join(work, output_name)
+        input_file = output_base + ".txt"
+
+        # Set the output base path
+        self._raw_lines["Output base path"] = output_base
+
+        # Ensure critical defaults
+        defaults = {
+            "sg_order1": 6, "sg_order2": 6,
+            "propagation_mode": 0,
+            "batch_mode": 0, "batch_destination": 0, "batch_steps": 1,
+            "batch_mode2": 0, "batch_destination2": 0, "batch_steps2": 1,
+            "fitting_mode": 0,
+        }
+        for k, v in defaults.items():
+            if k not in self._params:
+                self._params[k] = v
+
+        # Ensure string defaults
+        if "sequence" not in self._params:
+            self._params["sequence"] = "N"
+        if "fitting" not in self._params:
+            self._params["fitting"] = "N"
+
+        # Write the settings file
+        self.write_settings_file(input_file)
+
+        # Run CLI
+        cmd = [self.cli_path, input_file]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            if verbose:
+                if result.stdout:
+                    print(result.stdout)
+                if result.stderr:
+                    print("STDERR:", result.stderr)
+
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"LWE CLI exited with code {result.returncode}.\n"
+                    f"stdout: {result.stdout}\n"
+                    f"stderr: {result.stderr}"
+                )
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"LWE CLI not found at '{self.cli_path}'. "
+                f"Please provide the correct path via cli_path parameter."
+            )
+
+        # Load result
+        output_zip = output_base + ".zip"
+        if os.path.exists(output_zip):
+            self._result = lightwaveExplorerResult(output_zip)
+            self._output_path = output_zip
+        else:
+            raise FileNotFoundError(
+                f"Expected output file not found: {output_zip}. "
+                f"The simulation may have failed."
+            )
+
+        return self._result
+
+    def batch_run(self, param_name: str, values,
+                  output_dir: str = None, verbose: bool = True) -> list:
+        """
+        Run multiple simulations scanning over one parameter.
+        Returns a list of result dicts, ready for ML training.
+
+        :param param_name: Parameter to vary (python_name from PARAM_MAP)
+        :type param_name: str
+        :param values: Array of parameter values to scan
+        :param output_dir: Directory for output files (temp if None)
+        :type output_dir: str or None
+        :param verbose: Print progress
+        :type verbose: bool
+
+        :return: List of result dictionaries (from to_dict())
+        :rtype: list[dict]
+        """
+        results = []
+        for i, val in enumerate(values):
+            if verbose:
+                print(f"[{i+1}/{len(values)}] {param_name} = {val}")
+            self.set_params(**{param_name: val})
+            work = output_dir or None
+            if output_dir:
+                self._work_dir = output_dir
+            self.run(output_name=f"batch_{i:05d}", verbose=False)
+            results.append(self._result.to_dict())
+        if verbose:
+            print("Batch complete.")
+        return results
+
+    def cleanup(self):
+        """Remove temporary files created during simulation runs."""
+        if self._temp_dir:
+            self._temp_dir.cleanup()
+            self._temp_dir = None

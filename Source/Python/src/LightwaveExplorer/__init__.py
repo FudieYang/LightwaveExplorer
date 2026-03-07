@@ -2,6 +2,7 @@
 
 from .LightwaveExplorer import (
     EOS,
+    SimulationRunner,
     chi2axisSwap,
     chi2rotate,
     deviceDawson,
@@ -28,6 +29,7 @@ from .LightwaveExplorer import (
 
 __all__ = [
     "EOS",
+    "SimulationRunner",
     "chi2axisSwap",
     "chi2rotate",
     "deviceDawson",
