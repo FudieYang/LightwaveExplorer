@@ -1,0 +1,49 @@
+name: Build Windows CLI
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "*"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: choco install -y wget --no-progress
+        shell: cmd
+
+      - name: Build CLI (CPU-only)
+        run: |
+          cmake -E make_directory build
+          cd build
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DCLI=1 -DCMAKE_CXX_FLAGS="/O2 /EHsc"
+          cmake --build . --config Release
+        shell: cmd
+
+      - name: Copy CrystalDatabase
+        run: |
+          copy CrystalDatabase.txt build\Release\
+          copy Source\BuildResources\DefaultValues.ini build\Release\
+        shell: cmd
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LightwaveExplorer-CLI-Win64
+          path: |
+            build/Release/LightwaveExplorer.exe
+            build/Release/CrystalDatabase.txt
+            build/Release/DefaultValues.ini
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/Release/LightwaveExplorer.exe
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
