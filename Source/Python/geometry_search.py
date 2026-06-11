@@ -946,11 +946,11 @@ def evaluate_topology_cmaes(topo: TopologyChromosome, cli_path: str,
             key = f"g{i}_{p_name}"
             lo, hi = p_def["min"], p_def["max"]
             x0_val = max(lo, min(hi, defaults.get(key, (lo + hi) / 2.0)))
-            
+                
             # Dynamic boundaries: restrict crystal angles to +/- 10 degrees around the seed
             if is_crystal and p_name in ("theta", "phi"):
-                lo = max(0.0, x0_val - 5.0)
-                hi = min(180.0, x0_val + 5.0)
+                lo = max(0.0, x0_val - 15.0)
+                hi = min(180.0, x0_val + 15.0)
                 
             opt_specs.append((key, lo, hi, x0_val))
 
