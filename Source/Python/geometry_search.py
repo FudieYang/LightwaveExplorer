@@ -1,13 +1,3 @@
-"""
-Memetic ML-Driven Optical Topology Discovery for LightwaveExplorer
-(Genetic Algorithm for Topology + Bayesian Optimization for Parameters)
-
-v6: General optimizer with:
-    - Pairwise Ranking Transformer surrogate (replaces RandomForest)
-    - Sequence canonicalization (merge adjacent same-type operations)
-    - Adaptive mutation probabilities (learned from success history)
-    - Topology hash deduplication cache
-"""
 
 import numpy as np
 from collections import Counter
@@ -54,7 +44,7 @@ except ImportError:
     print("       Install with: pip install torch")
 
 # =============================================================================
-# 0. PATH CONFIG (修改这里就能适配任何机器)
+# 0. PATH CONFIG 
 # =============================================================================
 PROJECT_ROOT  = "/home/fudie/LightwaveExplorer"
 CLI_PATH      = os.path.join(PROJECT_ROOT, "build_cli", "LightwaveExplorer")
@@ -74,7 +64,7 @@ POP_SIZE              = 16   # Population size
 N_GENERATIONS         = 30   # Total GA generations
 MAX_WORKERS           = 2    # Parallel CPU workers for LWE
 SURROGATE_MAX_SEQ_LEN = 20   # Max sequence length for Transformer (pad/truncate)
-SURROGATE_MIN_DATA    = 100  # Minimum evaluations before surrogate activates
+SURROGATE_MIN_DATA    = 300  # Minimum evaluations before surrogate activates
 SURROGATE_OVERGENERATE = 6   # Generate N × this candidates, then screen to N
 SURROGATE_TRAIN_EPOCHS = 40  # Training epochs per refit
 SURROGATE_LR           = 3e-3  # Learning rate for Transformer
@@ -83,16 +73,27 @@ SURROGATE_LR           = 3e-3  # Learning rate for Transformer
 CMA_MAX_EVALS = 30    # Max LWE simulations per topology per call
 CMA_PATIENCE  = 10    # Early stop if no improvement in this many evals
 
-# Phase-matching angles for BIBO THG (locked, not optimized)
-PHASE_MATCH_ANGLES = [
-    {"theta": 0.0,   "phi": 0.0},
-    {"theta": 40.2,  "phi": 0.0},
-    {"theta": 139.8, "phi": 0.0},
-    {"theta": 11.0, "phi": 0.0},
-    {"theta": 169.0, "phi": 0.0},
-    {"theta": 35.2, "phi": 0.0},
-    {"theta": 164.8, "phi": 0.0},
-]
+import bibo_phase_matching as bpm
+from scipy.signal import find_peaks
+
+# Dynamically calculate all phase-matching angles for BiBO THG (2.3 um)
+def _compute_phase_matching_angles():
+    thetas = np.linspace(0, 180, 1800)
+    # SHG: 2.3 + 2.3 -> 1.15
+    dks_shg = [min(abs(v) for v in bpm.compute_delta_k(2.3, 2.3, 1.15, th, 0.0).values()) for th in thetas]
+    # SFG: 2.3 + 1.15 -> 0.766 (THG)
+    dks_sfg = [min(abs(v) for v in bpm.compute_delta_k(2.3, 1.15, 2.3/3.0, th, 0.0).values()) for th in thetas]
+    
+    peaks_shg, _ = find_peaks(-np.array(dks_shg))
+    peaks_sfg, _ = find_peaks(-np.array(dks_sfg))
+    
+    angles = []
+    for p in peaks_shg: angles.append({"theta": float(thetas[p]), "phi": 0.0})
+    for p in peaks_sfg: angles.append({"theta": float(thetas[p]), "phi": 0.0})
+    return angles
+
+PHASE_MATCH_ANGLES = _compute_phase_matching_angles()
+print(f"[Setup] Dynamically found {len(PHASE_MATCH_ANGLES)} phase-matching seeds.")
 
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "Source", "Python", "src"))
 import LightwaveExplorer as lwe
@@ -113,17 +114,17 @@ ATOMIC_LIBRARY = {
     "BiaxialCrystalBlock": {
         "params": {
             "theta": {"type": "continuous", "min": 0.0, "max": 180.0},
-            "phi": {"type": "continuous", "min": 0.0, "max": 180.0},
+            #"phi": {"type": "continuous", "min": 0.0, "max": 180.0},
             "length_um": {"type": "continuous", "min": 10.0, "max": 800.0}
         },
-        "template": "rotateIntoBiaxial(d,{theta:.4f},{phi:.4f},d)nonlinear(d,{theta:.4f},{phi:.4f},{length_um:.2f},d)rotateFromBiaxial(d,{theta:.4f},{phi:.4f},d)"
+        "template": "rotateIntoBiaxial(d,{theta:.4f},0.0,d)nonlinear(d,{theta:.4f},0.0,{length_um:.2f},d)rotateFromBiaxial(d,{theta:.4f},0.0,d)"
     },
 
     "NormalCrystalBlock": {
         "params": {
             "length_um": {"type": "continuous", "min": 10.0, "max": 2000.0}
         },
-        "template": "nonlinear(6,0.0000,0.0000,{length_um:.2f},d)"
+        "template": "nonlinear(20,0.0000,0.0000,{length_um:.2f},d)"
     },
 
     "RotateFrame": {
@@ -151,7 +152,7 @@ ATOMIC_LIBRARY = {
         "params": {
             "f_center_THz": {"type": "continuous", "min": 50.0, "max": 1500.0},
             "f_width_THz": {"type": "continuous", "min": 5.0, "max": 500.0},
-            "inBandAmplitude": {"type": "continuous", "min": -1.0, "max": 1.0},
+            "inBandAmplitude": {"type": "continuous", "min": 0.0, "max": 1.0},
             "outOfBandAmplitude": {"type": "continuous", "min": 0.0, "max": 1.0}
         },
         "template": "filter({f_center_THz:.2f},{f_width_THz:.2f},4,{inBandAmplitude:.4f},{outOfBandAmplitude:.4f})"
@@ -845,7 +846,7 @@ def _run_single_lwe(topo, param_dict, cli_path):
             pulse_energy2=0, frequency2=4.9e14, bandwidth2=2e13,
             sg_order2=4, gdd2=1e-28, beamwaist2=9e-5,
             polarization2=1.5707963267949,
-            material_index=4, crystal_theta=0, crystal_phi=0,
+            material_index=26, crystal_theta=0, crystal_phi=0,
             crystal_thickness=0.0004, dz=5e-7,
             grid_width=2.08e-4, grid_height=2.08e-4, dx=8e-6,
             time_span=6e-13, dt=5e-16,
@@ -927,7 +928,7 @@ def evaluate_topology_cmaes(topo: TopologyChromosome, cli_path: str,
                             warm_start: dict = None):
     """CMA-ES parameter optimization for a given topology.
     
-    Crystal theta/phi are LOCKED to phase-matching values (not optimized).
+    Crystal theta/phi bounds are restricted to +/- 2.0 degrees around phase-matching seeds.
     CMA-ES optimizes: lengths, rotation angles, and other continuous params.
     Covariance matrix adaptation automatically discovers parameter couplings.
     Early stops when no improvement is found for `patience` evaluations.
@@ -947,10 +948,10 @@ def evaluate_topology_cmaes(topo: TopologyChromosome, cli_path: str,
             lo, hi = p_def["min"], p_def["max"]
             x0_val = max(lo, min(hi, defaults.get(key, (lo + hi) / 2.0)))
                 
-            # Dynamic boundaries: restrict crystal angles to +/- 10 degrees around the seed
+            # Dynamic boundaries: enforce strictly narrow bounds (+/- 2.0 deg) around PM angle for Delta k ~ 0
             if is_crystal and p_name in ("theta", "phi"):
-                lo = max(0.0, x0_val - 15.0)
-                hi = min(180.0, x0_val + 15.0)
+                lo = max(0.0, x0_val - 2.0)
+                hi = min(180.0, x0_val + 2.0)
                 
             opt_specs.append((key, lo, hi, x0_val))
 
@@ -1382,8 +1383,8 @@ def run_evolution():
             sg_order1=2, beamwaist1=1.12e-5, delay1=-1.3e-13, polarization1=1.5707963267949,
             pulse_energy2=0, frequency2=4.9e14, bandwidth2=2e13,
             sg_order2=4, gdd2=1e-28, beamwaist2=9e-5, polarization2=1.5707963267949,
-            material_index=4, crystal_theta=0, crystal_phi=0,
-            crystal_thickness=0.0004, dz=5e-7, grid_width=2.08e-4, grid_height=2.08e-4, dx=8e-6,
+            material_index=26, crystal_theta=0, crystal_phi=0,
+            crystal_thickness=0.0004, dz=1e-6, grid_width=2.08e-4, grid_height=2.08e-4, dx=2e-5,
             time_span=6e-13, dt=5e-16, band_gap=6, effective_mass=1, drude_gamma=5e12, propagation_mode=2
         )
         baseline_runner.run(verbose=False, timeout=600)

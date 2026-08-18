@@ -55,7 +55,7 @@ ATOMIC_LIBRARY = {
         "params": {
             "length_um": {"min": 0.0, "max": 1000.0}
         },
-        "template": "nonlinear(6,0.0000,0.0000,{length_um:.4f},d)"
+        "template": "nonlinear(20,0.0000,0.0000,{length_um:.4f},d)"
     },
     "LinearPropagation": {
         "opt_group": "GRAD", # Linear dispersion

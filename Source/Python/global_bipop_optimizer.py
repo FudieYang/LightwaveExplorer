@@ -17,7 +17,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 CLI_PATH = os.path.join(PROJECT_ROOT, "build_cli", "LightwaveExplorer")
 TMP_DIR = "/mnt/d/lwe_tmp/tmp"
 
-MAX_CELLS = 6
+MAX_CELLS = 8
 STANDARD_LENGTHS = np.array([50, 100, 150, 200, 250, 300, 400, 500, 1000])
 
 # --- SPSA (Inner Gradient Search) Parameters ---
@@ -68,21 +68,21 @@ ATOMIC_LIBRARY = {
     "NormalCrystalBlock": {
         "params": {
             "type_score": {"min": -1.0, "max": 1.0, "tag": "CMA_SKIP"},
-            "length_um":  {"min": 0.0, "max": 10000.0, "tag": "CMA"}
+            "length_um":  {"min": 0.0, "max": 10000.0, "tag": "SPSA"}
         },
         "template": "nonlinear(20,0.0000,0.0000,{length_um:.4f},d)"
     },
     "LinearPropagation": {
         "params": {
             "type_score": {"min": -1.0, "max": 1.0, "tag": "CMA_SKIP"},
-            "length_um": {"min": 0.0, "max": 1000.0, "tag": "CMA"}
+            "length_um": {"min": 0.0, "max": 1000.0, "tag": "SPSA"}
         },
         "template": "linear(0,0,0,{length_um:.4f},d)"
     },
     "RotateFrame": {
         "params": {
             "type_score": {"min": -1.0, "max": 1.0, "tag": "CMA_SKIP"},
-            "angle": {"min": -180.0, "max": 180.0, "tag": "CMA"}
+            "angle": {"min": -180.0, "max": 180.0, "tag": "SPSA"}
         },
         "template": "rotate({angle:.4f})"
     },
