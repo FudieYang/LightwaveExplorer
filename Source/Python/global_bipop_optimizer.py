@@ -82,7 +82,7 @@ ATOMIC_LIBRARY = {
     "RotateFrame": {
         "params": {
             "type_score": {"min": -1.0, "max": 1.0, "tag": "CMA_SKIP"},
-            "angle": {"min": -180.0, "max": 180.0, "tag": "SPSA"}
+            "angle": {"min": -180.0, "max": 180.0, "tag": "CMA"}
         },
         "template": "rotate({angle:.4f})"
     },
