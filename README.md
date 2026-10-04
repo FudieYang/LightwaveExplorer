@@ -1,191 +1,117 @@
 <p align="center"><img src="Source/BuildResources/Icon.svg" width="256" height="256"></p>
 
 ## <p align="center">Lightwave Explorer</p>
-<p align="center">Nick Karpowicz<br>
- Max Planck Institute of Quantum Optics</p>
+<p align="center"><b>Python Optimization by Fudie Yang</b></p>
+
+> **Original Project Notice & Citation:**  
+> This project is a fork based on **Lightwave Explorer** created by **Nick Karpowicz** (Max Planck Institute of Quantum Optics).  
+> Please reference the original publication, tutorials, and documentation below:
 
 ---
-Publication!
+
+### Original Publication!
 - N. Karpowicz, Open source, heterogenous, nonlinear-optics simulation. [*Optics Continuum* **2**, 2244-2254 (2023).](https://opg.optica.org/optcon/fulltext.cfm?uri=optcon-2-11-2244&id=540999)
 
-Tutorials on YouTube!
+### Tutorials on YouTube!
 - <a href="https://youtu.be/JY4wm2e7y_M">Explanation of the new beam modes in version 2026.1</a>
 - <a href="https://youtu.be/sZ5Evkgj4Vk">Introduction, main tutorial (2026 update!)</a>
 - <a href="https://youtu.be/qlcy_RBLGoU">Adding a crystal to the database</a>
 - <a href="https://youtu.be/v5O0UOUdfKE">Birefringence</a>
 - <a href="https://www.youtube.com/watch?v=4njswvog4bo">FDTD</a>
 
-[Documentation](https://nickkarpowicz.github.io/LightwaveExplorerDocumentation)!
-
----
-### Latest release: 2026.1 ([changelog](https://github.com/NickKarpowicz/LightwaveExplorer/blob/master/Documentation/changelog.md))
-**Windows:** [Download .zip](https://github.com/NickKarpowicz/LightwaveExplorer/releases/latest/download/LightwaveExplorerWin64.zip) (note: if you use SYCL for GPU acceleration on intel, please use the newest [DPC++/C++ Compiler Runtime](https://www.intel.com/content/www/us/en/developer/tools/oneapi/runtime-versions-download.html); you don't need this if you're not using intel graphics).
-
-Free code signing on Windows provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org)
-
-**Linux:**
-
-<a href='https://flathub.org/apps/io.github.NickKarpowicz.LightwaveExplorer'>
-    <img width='240' alt='Get it on Flathub' src='https://flathub.org/api/badge?locale=en'/>
-</a>
-
-
-**Mac:** [compile it yourself](#compiling-on-mac)
+[Original Documentation](https://nickkarpowicz.github.io/LightwaveExplorerDocumentation)!
 
 ---
 
+## Fork Extensions & Features
 
-### What and why
+The main purpose of this fork is to provide a **more flexible Python interface**, enabling users to programmatically control, script, and interact with Lightwave Explorer directly inside Python environments.
 
-Lightwave explorer is an open source nonlinear optics simulator, intended to be fast, visual, and flexible for students and researchers to play with ultrashort laser pulses and nonlinear optics without having to buy a laser first.
+Key capabilities added:
+- **Flexible Python Interface**: Easily configure simulation parameters, execute C++ / GPU backends via `SimulationRunner`, and load binary field and spectrum results directly into NumPy/SciPy arrays for post-processing and custom workflows:
+  ```python
+  import LightwaveExplorer as lwe
 
-<p style="text-align: center;"><img src="Documentation/Images/flatpakScreenshot.png"></p>
+  # Initialize a simulation runner using the compiled CLI binary (e.g., build/LightwaveExplorer)
+  runner = lwe.SimulationRunner(cli_path="build/LightwaveExplorer", work_dir="/tmp/lwe_run")
 
-The simulation can make use of Nvidia or intel GPUs on Windows, and on Linux, Nvidia, AMD, and Intel. On all platforms, including Mac, it can also run on your CPU.
+  # Configure simulation parameters
+  runner.set_params(
+      sequence="init()rotateIntoBiaxial(d,40.2,0.0,d)nonlinear(d,40.2,0.0,250.0,d)rotateFromBiaxial(d,40.2,0.0,d)",
+      pulse_energy1=1.9e-08, frequency1=1.3e14, bandwidth1=1.5e13,
+      material_index=26, crystal_thickness=0.0004
+  )
 
----
+  # Run the simulation
+  runner.run()
 
-#### Main goals:
- - _Easily extensible database of materials:_ Eveything the program knows about nonlinear materials comes from a human-readable text file giving the appropriate coefficients and tensors. If you want to use a new material, or you've done a measurement in a new range where typical extrapolations from older data isn't relevant, it's easy to add and correct. There are places for references for the key parameters, and these references are stored in the saved simulation results for future reference. Especially if you have simulations that you checked against experiments, I'd be very happy for you to add your crystal definitions to the central database in the project Github.
- - _Accurate modeling of nonlinear optics_ using multiple, user-selectable physical models, including the unidirectional nonlinear wave equation and finite-difference time-domain approaches. This allows calculations that accommodate large systems where forward-propagation is an appropriate assumption, but also of etalon effects in thin crystals where reflections cannot be neglected.
- - _Efficient code so that complicated systems can be simulated in 3D:_ Real laser pulses can be messy, and if they weren't so before a nonlinear crystal, there's a good chance they are after (but not always). If things are slow, it's hard to go beyond one dimension on tolerable time scales, and then you miss out on the whole weird world of spatiotemporal couplings. Here you have options for rather fast simulations when there's a symmetry to apply (e.g. cylindrical or along one Cartesian dimension), alongside fully 3D propagation. Runs natively on both GPU and CPU to make use of whatever you have to work with.
- - _A graphical interface that lets you see what you're doing:_ A lot of us think in visual terms. Being able to adjust and scan parameters and immediately see what happens can really make it easier to understand what you're looking at.
- - _A flexible sequence mode:_ By stringing together elements, not just nonlinear crystals but also spherical or parabolic mirrors, apertures, filters, free space propagation and other elements, simulate how  one interaction affects another. Sequences of events can be scripted and even programmed with loop functions to see how things change over the course of repeated interactions.
- - _Fitting modes:_ Sometimes the data that we measure depends in an interesting way on a parameter, and we'd actually like to go back and figure out what that parameter was from the data. Solving this kind of inverse problem can be tough when the parameter lives inside a partial differential equation, but by simulating the whole thing and doing a fit, you have a chance to do it! The fitting algorithm can be used to narrow down a huge space of variables to come at your best estimation of what was happening in an experiment, or to adjust your experimental system to maximize output at a given frequency.
- - _A Python module for easy postprocessing of the results:_ I hope that you get something interesting out that you want to plot and maybe publish. One of the nicest platforms for making nice plots is Python in my opinion (that's why the documentation is in a Jupyter notebook), so purely out of self interest I tried to make it easy to load the results in Python. The module also has some functions related to typical operations you'd like to do on the data to make it easy for all of us. The program also gives you a Matlab loading script for those who want to use that. To get it, it's just
- ```
- pip install LightwaveExplorer
- ```
- - _Multiplatform:_ Works on Windows, Linux, and Mac.
- - _Command line interface for running on Linux/clusters:_ the simulation core can be compiled as a command line application to be controlled via the SLURM system. The GUI app can automatically configure the SLURM script, as well. I use this to run it on the clusters of the Max Planck Society, and other institutes and universities likely have similar systems. This lets you do a lot more if your personal resources are limited but you want to run simulations on a large grid or cover a lot of different parameters!
-
----
-
-  ### Publications
-  Lightwave Explorer has been used in the following papers!
-  - Christina Hofer, *et al.*, Linear field-resolved spectroscopy approaching ultimate detection sensitivity. [*Optics Express* **33**, 1-17 (2025)](https://opg.optica.org/oe/fulltext.cfm?uri=oe-33-1-1).
-  - Steffen Gommel *et al.*, Photonic time stretch fieldoscopy: single-shot electric field detection at near-petahertz bandwidth. [Arxiv arXiv:2512.03665](https://arxiv.org/abs/2512.03665).
-  - Tim Klee *et al.*, Efficient generation of femtosecond deep-ultraviolet pulses by single-focus cascaded second-harmonic conversion. [*Optics Express* **23**, 47840-47848 (2025)](https://opg.optica.org/oe/fulltext.cfm?uri=oe-33-23-47840).
-  - Benjamin T. Dewes, *et al.*, Fast ultraviolet-C photonics: generating and sensing laser pulses on femtosecond timescales. [*Light: Science & Applciations* **14**, 384 (2025).](https://www.nature.com/articles/s41377-025-02042-2).
-  - Maciej Kowalczyk, *et al.*, Ultra-CEP-stable single-cycle pulses at 2.2 µm. [*Optica* **10**, 801-811 (2023)](https://opg.optica.org/optica/fulltext.cfm?uri=optica-10-6-801).
-  - Najd Altwaijry, *et al.*, Broadband Photoconductive Sampling in Gallium Phosphide. [*Advanced Optical Materials* **11**, 2202994 (2023)](https://onlinelibrary.wiley.com/doi/full/10.1002/adom.202202994).
-  - Hadil Kassab, *et al.*, In-line synthesis of multi-octave phase-stable infrared light, [*Optics Express* **31**, 24862 (2023)](https://opg.optica.org/oe/fulltext.cfm?uri=oe-31-15-24862).
+  # Access spectrum and electric field results directly as NumPy arrays
+  freq = runner.result.frequencyVectorSpectrum
+  spectrum = runner.result.spectrumTotal
+  ```
+- **Automated Optimization**: Includes scripts in `Source/Python` for optical sequence searching, parameter fitting, and landscape diagnostics. For detailed methodology and results, please refer to my upcoming Master's thesis on the [Attoworld website](https://attoworld.de/) (currently unreleased).
 
 ---
 
-### Compiling the GUI app on Linux
-You will at least need the development versions of following installed: fmt, Qt, Cairo, and TBB (these are what they are called on Fedora/dnf, the names might slightly differ on your repo):
-```
-fmt-devel, qt6-qtbase-devel, cairo-devel, tbb-devel
+## Installation & Setup
+
+### 1. Download & Install Python Package
+```bash
+# Clone the repository
+git clone https://github.com/FudieYang/LightwaveExplorer.git
+cd LightwaveExplorer
+
+# Install the Python package
+pip install Source/Python
 ```
 
-Next, the basic command is to use cmake in the usual way:
+### 2. Compile CLI Binary on Linux (Required for `SimulationRunner`)
+To run simulations programmatically via Python, compile the C++ Command Line Interface (CLI) binary using CMake with `-DCLI=1`.
 
-```
+> **Note & Reference**: Below are quick Linux build commands used in this fork. For full compilation details, advanced CMake options, and other operating systems (Windows, Mac, SLURM Clusters), please refer to the original [Lightwave Explorer Repository](https://github.com/NickKarpowicz/LightwaveExplorer) and [Documentation](https://nickkarpowicz.github.io/LightwaveExplorerDocumentation).
+
+#### Prerequisites
+System development libraries required on Linux (e.g., Fedora/dnf or Ubuntu/apt equivalents): `fmt-devel`, `qt6-qtbase-devel`, `cairo-devel`, `tbb-devel`.
+
+#### Basic CPU Build
+```bash
 mkdir build && cd build
-cmake ..
+cmake -DCLI=1 ..
 cmake --build . --config Release
 ```
-and you should have a binary to run. You should either install it (sudo cmake --install .) or copy the files CrystalDatabase.txt and DefaultValues.ini to the build folder and run it.
 
-The basic build will run on your CPU only.
-
-In order to run on a GPU, the options are either CUDA (Nvidia) or SYCL (Intel, AMD or Nvidia).
-
-#### CUDA
-
-To enable CUDA, you need additional flags. Here's an example:
+#### NVIDIA CUDA GPU Acceleration
+> **Note**: Ensure the [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit) is installed beforehand.
+```bash
+mkdir build && cd build
+cmake -DCLI=1 -DUSE_CUDA=1 -DCMAKE_CUDA_HOST_COMPILER=g++ -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc -DCMAKE_CUDA_ARCHITECTURES=86 ..
+cmake --build . --config Release
 ```
-cmake -DUSE_CUDA=1 -DCMAKE_CUDA_HOST_COMPILER=clang++-17 -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc -DCMAKE_CUDA_ARCHITECTURES=86 ..
-```
- - USE_CUDA should just be set to 1.
- - Your CUDA_HOST_COMPILER should be a version of g++ or clang++ compatible with your version of CUDA
- - Your CUDA_ARCHITECTURES should match your card (on consumer boards: 75 for 20-series, 86 for 30-series, 89 for 40-series)
 
-#### SYCL
-A different set of flags will let you compile to use SYCL. You'll need a SYCL compiler. For Intel, you should use the one in the OneAPI basekit. For AMD, use the [open source version](https://github.com/intel/llvm).
+#### SYCL GPU Acceleration (Intel / AMD)
+> **Note**: Ensure Intel OneAPI Base Toolkit (`icpx`) or DPC++ compiler for AMD ROCm is installed beforehand.
+```bash
+# Intel GPU
+cmake -DCLI=1 -DUSE_SYCL=1 -DCMAKE_CXX_COMPILER=icpx ..
+cmake --build . --config Release
 
-Here's an example for AMD:
+# AMD GPU (ROCm)
+cmake -DCLI=1 -DUSE_SYCL=1 -DBACKEND_ROCM=gfx906 -DROCM_LIB_PATH=/usr/lib/clang/18/amdgcn/bitcode -DCMAKE_CXX_COMPILER=clang++ ..
+cmake --build . --config Release
 ```
-cmake -DUSE_SYCL=1 -DBACKEND_ROCM=gfx906 -DROCM_LIB_PATH=/usr/lib/clang/18/amdgcn/bitcode -DCMAKE_CXX_COMPILER=clang++ ..
-```
-  - USE_SYCL should be 1
-  - BACKEND_ROCM should be set to the board architecture you want to use. This case was with a Radeon VII.
-  - ROCM_LIB_PATH might not be necessary for your system, but on Fedora it was. You have to locate the bitcode folder of the ROCM install.
-  - the compiler is the special version of clang++ from the [DPC++ project](https://github.com/intel/llvm)
-  - rocm, hip, and rocfft must be installed on your system.
-
-Here's an example for Intel:
-```
-cmake -DUSE_SYCL=1 -DCMAKE_CXX_COMPILER=icpx ..
-```
-  - The Intel (SPIR-V) backend is the default, so that's what you get if nothing else is specified
-  - Use the Intel compiler provided by the OneAPI Base Toolkit (icpx).
-  - You will need to source the OneAPI setvars.sh script first. e.g.
-  ```
-  . /opt/intel/oneapi/setvars.sh
-  ```
-
-You can also use -DBACKEND_CUDA=1 to use SYCL on an Nvidia GPU.
-
-Additional compiler flags:
-  - CLI, set to 1 to build a command line version
 
 ---
 
-  ### Compiling on Mac
+## Overview of Added Files (`Source/Python`)
 
-  The first thing you'll need is [Homebrew](https://brew.sh/). If you go there, you'll see a command that you have to run in the terminal. Just paste it and follow the instructions.
+This fork introduces several key Python scripts and modules in `Source/Python`:
 
-  I also made a build script that you can run in the same way; just copy and paste the command below that matches your system and it will compile everything it needs and put the application in your Applications folder. It will take a while, so go get a coffee!
+- **`global_bipop_optimizer.py`**: Dual-loop optimizer combining BIPOP-CMA-ES (for non-convex global sequence and orientation search) and SPSA (for fast local parameter tuning).
+- **`landscape_analyzer.py`**: Diagnostic framework for analyzing phase-matching maps, Morris elementary effects sensitivity ($\mu^*, \sigma$), and generating 3D interactive surfaces.
+- **`bibo_phase_matching.py`**: Sellmeier dispersion solver, Fresnel equation solver, and phase mismatch ($\Delta k$) engine for BiBO crystals.
+- **`sequence_pruner.py`**: Knock-out ablation tool to mute sequence elements one-by-one and extract minimal core configurations.
+- **`island_cmaes_optimizer.py`**: Multi-island CMA-ES optimizer with dynamic elite migration.
+- **`geometry_search.py`**: Structural and geometrical search framework *(early version, un-tuned)*. Contains initial implementations of Optuna parameter searching, and a PyTorch-based Transformer surrogate ranking model.
 
-  (Please note that what's happening here is a shell script from the internet piped into the terminal. Never do this if you don't trust the developer, and even then it's a good idea to check the contents of the script by pasting the URL into your browser. Essentially, this is like letting me type into your Mac's terminal. I'm using it to compile the code and copy the resulting app, but someone at your terminal can also delete or copy your files.)
 
-  ```
-  curl -s https://raw.githubusercontent.com/NickKarpowicz/LightwaveExplorer/master/Source/BuildResources/macAutoBuild.sh | zsh -s
-  ```
 
----
-  ### Compilation on clusters
-
-  A script is provided to compile the CUDA command line version on Linux. This is made specifically to work on the clusters of the MPCDF but will likely work with small modifications on other distributions depending on the local environment. The CUDA development kit and Intel OneAPI should be available in advance. With these prerequisites, the following command should work:
-  ```
-curl -s https://raw.githubusercontent.com/NickKarpowicz/LightwaveExplorer/master/Source/BuildResources/compileCommandLineLWEfromRepos.sh | tcsh -s
- ```
- On other clusters you might have to instead dowload the script (e.g. with wget) and change it to suit that system before you run it.
-
- If you have the GUI version installed locally, you can set up your calculation and then generate a SLURM script to run on the cluster (it will tell you what to do).
-
- ---
-
-### Compilation on Windows
-This is now handled by a Github action - the recipie is in the file .github/workflows/windows-build.yml in the repo if you'd like to look inside and replicate it.
-
- ---
-  ### Libraries used
-Thanks to the original authors for making their work available! They are all freely available, but of course have their own licenses .etc.
-  - [Qt](https://qt.io): This is how the GUI is built in the newest version, and is why it should now use the native style on Windows, Mac, and Linux.
-  - [NVIDIA CUDA](https://developer.nvidia.com/cuda-toolkit): This provides the basic CUDA runtime, compiler, and cuFFT, for running the simulations on NVIDIA GPUs, and is the basis of the fastest version of this code.
-  - [Intel OneAPI](https://www.intel.com/content/www/us/en/developer/tools/oneapi/overview.html): The DPC++ compiler allows the program to run on both CPUs and a wider range of GPUs, including the integrated ones on Intel chips. I found that on my rather old laptop, SYCL on the GPU is several times faster than running on CPU, so it's useful even for systems without dedicated GPUs. It also now will work with AMD graphics cards on Linux.
-  - [Dlib](http://dlib.net/): This library is the basis of the optimization routines. I make use of the global optimization functions for the fitting/optimization modes. The library is [available on Github](https://github.com/davisking/dlib), and their excellent documentation and further information is on the [main project website](http://dlib.net/).
-  - [PocketFFT](https://gitlab.mpcdf.mpg.de/mtr/pocketfft/-/tree/cpp) - this is what is used for the CPU-based Fourier transforms. It's a nice, fast, header-only library, and I strongly recommend it for C++ programs!
-  - [miniz](https://github.com/richgel999/miniz): Nice and easy to use C library for making/reading .zip archives.
-
-  ---
-  ### Code signing
-
-The windows releases are now signed thanks to [SignPath.io](https://signpath.io), with a certificate provided by [SignPath Foundation](https://signpath.org)! This means that they should no longer pop up a warning the first time you run them, and you can have some confidence in the provenance of the binary you are using.
-
-  ---
-
-  ### Programming note
-
-  The code is written in a "trilingual" way - a single core code file is compiled (after some includes and preprocessor definitions) by the three different compilers, Nvidia nvcc, a c++ compiler (either Microsoft's, g++, or clang++ have all worked), and Intel dpc++.
-
-  Although CUDA was the initial platform and what I use (and test) most extensively, I've added two additional languages for those who don't have an Nvidia graphics card.
-
-  One is in c++, with multithreading done with either with OpenMP or using C++ parallel execution policies.
-
-  The other language is SYCL. This also allows the simulation to run on the CPU and should allow it to run on Intel's graphics cards, as well as the integrated graphics of many Intel CPUs, and GPUs from AMD (Linux only).
-
-  The different architectures are using the same algorithm, aside from small differences in their floating point math and intrinsic functions. So when I make changes or additions, there will never be any platform gaining over the other (again, reproducibility by anyone is part of the goals here).
